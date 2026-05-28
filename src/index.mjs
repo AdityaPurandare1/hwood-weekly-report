@@ -56,6 +56,10 @@ function scrubMessage(msg) {
 }
 
 async function main() {
+  if (!NOTABLE_ISSUES_SHEET_ID) {
+    throw new Error('Missing NOTABLE_ISSUES_SHEET_ID env var');
+  }
+
   // 1. Timezone guard — only run when local LA hour is within ±1 of GUARD_HOUR.
   const skipGuard = DRY_RUN || process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
   if (!skipGuard) {

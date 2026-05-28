@@ -24,9 +24,8 @@ export const VENUE_TITLE_PATTERNS = [
 
 // Output: the Notable Issues Google Sheet we write a new tab into each week.
 // Real ID comes from the NOTABLE_ISSUES_SHEET_ID secret. No fallback —
-// fail loudly in misconfigured environments rather than write to a stale sheet.
-export const NOTABLE_ISSUES_SHEET_ID = process.env.NOTABLE_ISSUES_SHEET_ID
-  || (() => { throw new Error('Missing NOTABLE_ISSUES_SHEET_ID env var'); })();
+// the orchestrator checks this is set before using it.
+export const NOTABLE_ISSUES_SHEET_ID = process.env.NOTABLE_ISSUES_SHEET_ID || '';
 
 // Slack channels for venue inventory chatter (mirrors inventory-workflow app).
 export const VENUE_SLACK_CHANNELS = {
