@@ -44,7 +44,7 @@ Slack venue channels ──► GPT parse ─┘
 | `SLACK_TOKEN` | Slack user token (xoxp) with `channels:history`, `groups:history`, `im:history`, `conversations.list` | `xoxp-...` |
 | `GH_MODELS_TOKEN` | GitHub PAT with `models:read` scope (re-exposed to the script as `GITHUB_MODELS_TOKEN`) | `ghp_...` |
 | `RESEND_API_KEY` | Resend dashboard | `re_...` |
-| `PATI_SLACK_USER_ID` | Pati's Slack profile -> More -> Copy member ID | `U01ABC2DEF` |
+| `PATI_DM_CHANNEL_ID` | Open Pati's DM in Slack -> click her profile -> "Channel ID" at the bottom | `D0XXXXXXXXX` |
 | `NOTABLE_ISSUES_SHEET_ID` | The `/d/<id>/` segment of the Notable Issues sheet URL | 44-char alphanumeric |
 | `EMAIL_RECIPIENTS` | Comma-separated list of recipient addresses | `a@x.com,b@y.com` |
 
@@ -95,7 +95,7 @@ GOOGLE_REFRESH_TOKEN=1//0gxxx
 SLACK_TOKEN=xoxp-xxx
 GITHUB_MODELS_TOKEN=ghp_xxx
 RESEND_API_KEY=re_xxx
-PATI_SLACK_USER_ID=U01ABC2DEF
+PATI_DM_CHANNEL_ID=D0XXXXXXXXX
 NOTABLE_ISSUES_SHEET_ID=<44-char id>
 EMAIL_FROM=Hwood Inventory Bot <bot@yourdomain.com>
 EMAIL_REPLY_TO=you@yourdomain.com

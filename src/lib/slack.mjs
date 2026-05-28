@@ -4,7 +4,7 @@
 //
 // Uses your existing xoxp user token (read-only by intent — no posting).
 
-import { VENUE_TITLE_PATTERNS, VENUE_SLACK_CHANNELS, PATI_SLACK_USER_ID } from '../config.mjs';
+import { VENUE_TITLE_PATTERNS, VENUE_SLACK_CHANNELS, PATI_DM_CHANNEL_ID } from '../config.mjs';
 
 const SLACK = 'https://slack.com/api';
 
@@ -28,12 +28,6 @@ async function slack(method, params = {}, opts = {}) {
   const data = await res.json();
   if (!data.ok) throw new Error(`Slack ${method} failed: ${data.error}`);
   return data;
-}
-
-// Open or get the DM channel ID with a single user.
-async function getDmChannel(userId) {
-  const data = await slack('conversations.open', {}, { body: { users: userId } });
-  return data.channel.id;
 }
 
 // Pull messages from a channel within the last N days.
@@ -73,11 +67,10 @@ function venueFromTitle(title) {
 // Returns { 'Bird Streets Club': '<sheetId>', 'Delilah - LA': '<sheetId>', ... }
 // Only venues Pati posted for THIS week are included.
 export async function findVarianceSheetsFromPati(daysBack = 7) {
-  if (!PATI_SLACK_USER_ID) {
-    throw new Error('Missing PATI_SLACK_USER_ID env var (her Slack user ID)');
+  if (!PATI_DM_CHANNEL_ID) {
+    throw new Error('Missing PATI_DM_CHANNEL_ID env var (her DM channel ID, starts with "D")');
   }
-  const dm = await getDmChannel(PATI_SLACK_USER_ID);
-  const messages = await readChannelHistory(dm, daysBack);
+  const messages = await readChannelHistory(PATI_DM_CHANNEL_ID, daysBack);
 
   const result = {};
   // Walk newest-first; first match per venue wins (most recent share).

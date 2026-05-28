@@ -35,9 +35,9 @@ export const VENUE_SLACK_CHANNELS = {
   'The Nice Guy':       process.env.SLACK_CHANNEL_NICE_GUY,
 };
 
-// Pati's Slack user ID (so we read variance links only from her DMs, not anyone else).
-// Set this env var with her ID from Slack — get it via /open in DM, then click her name.
-export const PATI_SLACK_USER_ID = process.env.PATI_SLACK_USER_ID;
+// Pati's DM channel ID (starts with "D") — read variance links only from her DMs.
+// Get it from Slack: open the DM with Pati, click her profile, scroll to "Channel ID".
+export const PATI_DM_CHANNEL_ID = process.env.PATI_DM_CHANNEL_ID;
 
 // Email
 export const EMAIL_FROM = process.env.EMAIL_FROM ?? 'Hwood Inventory Bot <onboarding@resend.dev>';

@@ -35,7 +35,7 @@ jobs:
           SLACK_TOKEN:              ${{ secrets.SLACK_TOKEN }}
           GITHUB_MODELS_TOKEN:      ${{ secrets.GH_MODELS_TOKEN }}
           RESEND_API_KEY:           ${{ secrets.RESEND_API_KEY }}
-          PATI_SLACK_USER_ID:       ${{ secrets.PATI_SLACK_USER_ID }}
+          PATI_DM_CHANNEL_ID:       ${{ secrets.PATI_DM_CHANNEL_ID }}
           NOTABLE_ISSUES_SHEET_ID:  ${{ secrets.NOTABLE_ISSUES_SHEET_ID }}
           EMAIL_RECIPIENTS:         ${{ secrets.EMAIL_RECIPIENTS }}
           EMAIL_FROM:               ${{ vars.EMAIL_FROM }}
