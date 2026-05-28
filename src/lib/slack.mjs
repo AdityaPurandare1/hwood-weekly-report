@@ -66,6 +66,10 @@ function venueFromTitle(title) {
 
 // Returns { 'Bird Streets Club': '<sheetId>', 'Delilah - LA': '<sheetId>', ... }
 // Only venues Pati posted for THIS week are included.
+//
+// Pati shares Google Sheets via Drive integration, so they show up in msg.files[]
+// as filetype=gsheet, external_type=gdrive. We also fall back to attachment unfurls
+// in case she ever pastes a URL directly.
 export async function findVarianceSheetsFromPati(daysBack = 7) {
   if (!PATI_DM_CHANNEL_ID) {
     throw new Error('Missing PATI_DM_CHANNEL_ID env var (her DM channel ID, starts with "D")');
@@ -75,11 +79,20 @@ export async function findVarianceSheetsFromPati(daysBack = 7) {
   const result = {};
   // Walk newest-first; first match per venue wins (most recent share).
   for (const msg of messages) {
+    // Primary: Drive-integration files
+    for (const f of msg.files ?? []) {
+      if (f.filetype !== 'gsheet') continue;
+      const titleSource = f.name || f.title || '';
+      const venue = venueFromTitle(titleSource);
+      if (!venue || result[venue]) continue;
+      const sheetId = extractSheetId(f.external_url || f.url_private || f.permalink);
+      if (sheetId) result[venue] = sheetId;
+    }
+    // Fallback: pasted-URL unfurl attachments
     for (const att of msg.attachments ?? []) {
       if (att.service_name !== 'Google Sheets') continue;
       const venue = venueFromTitle(att.title ?? '');
-      if (!venue) continue;
-      if (result[venue]) continue; // already have a newer one
+      if (!venue || result[venue]) continue;
       const sheetId = extractSheetId(att.title_link ?? att.original_url ?? att.from_url);
       if (sheetId) result[venue] = sheetId;
     }

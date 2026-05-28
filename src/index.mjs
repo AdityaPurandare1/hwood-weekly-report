@@ -74,14 +74,21 @@ async function main() {
     return map;
   });
 
-  // 3. Read variance per venue.
+  // 3. Read variance per venue. Skip venues whose sheet isn't shared with us —
+  //    one inaccessible venue shouldn't kill the whole run.
   const varianceByVenue = await logGroupAsync('Read variance per venue', async () => {
     const result = {};
+    let skipped = 0;
     for (const [venue, sheetId] of Object.entries(varianceSheets)) {
-      const { rows } = await readLatestVarianceWeek(sheetId);
-      result[venue] = parseVarianceRows(rows);
+      try {
+        const { rows } = await readLatestVarianceWeek(sheetId);
+        result[venue] = parseVarianceRows(rows);
+      } catch (err) {
+        skipped++;
+        console.log(`::warning::Variance read skipped for one venue (sheet inaccessible — likely a share-permission issue)`);
+      }
     }
-    console.log(`Read variance for ${Object.keys(result).length} venues`);
+    console.log(`Read variance for ${Object.keys(result).length} venues${skipped ? `, skipped ${skipped}` : ''}`);
     return result;
   });
 
