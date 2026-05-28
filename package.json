@@ -1,0 +1,18 @@
+{
+  "name": "hwood-weekly-report",
+  "version": "0.1.0",
+  "description": "Weekly Notable Issues report — pulls Slack inventory messages, joins against Pati's variance sheets, writes a new tab to the Notable Issues Google Sheet, and emails recipients.",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "start": "node src/index.mjs",
+    "test": "node src/index.mjs --dry-run"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "openai": "^4.77.0",
+    "resend": "^4.0.1"
+  }
+}

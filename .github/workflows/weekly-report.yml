@@ -1,0 +1,55 @@
+name: Weekly Notable Issues Report
+
+on:
+  schedule:
+    # Tuesday 10am PT — fires both PST (18:00 UTC) and PDT (17:00 UTC); the script's
+    # timezone guard ensures only the correct one for the current season actually runs.
+    - cron: '0 18 * * 2'
+    - cron: '0 17 * * 2'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'Dry run (skip writing tab + sending email)'
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      - name: Install
+        run: npm install --omit=dev
+      - name: Run pipeline
+        env:
+          GOOGLE_CLIENT_ID:         ${{ secrets.GOOGLE_CLIENT_ID }}
+          GOOGLE_CLIENT_SECRET:     ${{ secrets.GOOGLE_CLIENT_SECRET }}
+          GOOGLE_REFRESH_TOKEN:     ${{ secrets.GOOGLE_REFRESH_TOKEN }}
+          SLACK_TOKEN:              ${{ secrets.SLACK_TOKEN }}
+          GITHUB_MODELS_TOKEN:      ${{ secrets.GH_MODELS_TOKEN }}
+          RESEND_API_KEY:           ${{ secrets.RESEND_API_KEY }}
+          PATI_SLACK_USER_ID:       ${{ secrets.PATI_SLACK_USER_ID }}
+          NOTABLE_ISSUES_SHEET_ID:  ${{ secrets.NOTABLE_ISSUES_SHEET_ID }}
+          EMAIL_RECIPIENTS:         ${{ secrets.EMAIL_RECIPIENTS }}
+          EMAIL_FROM:               ${{ vars.EMAIL_FROM }}
+          EMAIL_REPLY_TO:           ${{ vars.EMAIL_REPLY_TO }}
+          SLACK_CHANNEL_BSC:           ${{ vars.SLACK_CHANNEL_BSC }}
+          SLACK_CHANNEL_DELILAH_LA:    ${{ vars.SLACK_CHANNEL_DELILAH_LA }}
+          SLACK_CHANNEL_DELILAH_MIAMI: ${{ vars.SLACK_CHANNEL_DELILAH_MIAMI }}
+          SLACK_CHANNEL_KEYS:          ${{ vars.SLACK_CHANNEL_KEYS }}
+          SLACK_CHANNEL_POPPY:         ${{ vars.SLACK_CHANNEL_POPPY }}
+          SLACK_CHANNEL_NICE_GUY:      ${{ vars.SLACK_CHANNEL_NICE_GUY }}
+          GITHUB_EVENT_NAME: ${{ github.event_name }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            node src/index.mjs --dry-run
+          else
+            node src/index.mjs
+          fi
