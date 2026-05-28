@@ -18,7 +18,8 @@ export const VENUE_TITLE_PATTERNS = [
   { pattern: /Delilah\s*Miami.*Weekly Variance/i,venue: 'Deliliah - Miami' },
   { pattern: /Keys.*Weekly Variance/i,           venue: 'Keys' },
   { pattern: /Nice\s*Guy.*Weekly Variance/i,     venue: 'The Nice Guy' },
-  { pattern: /Final Count.*Poppy/i,              venue: 'Poppy' },
+  { pattern: /Poppy.*Weekly Variance/i,          venue: 'Poppy' },
+  { pattern: /Final Count.*Poppy/i,              venue: 'Poppy' }, // legacy naming
 ];
 
 // Output: the Notable Issues Google Sheet we write a new tab into each week.
