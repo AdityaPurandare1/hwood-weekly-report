@@ -192,9 +192,8 @@ async function main() {
   ])];
 
   await writeValues(NOTABLE_ISSUES_SHEET_ID, finalTitle, rows);
-  if (isNewTab) {
-    await formatHeaderRow(NOTABLE_ISSUES_SHEET_ID, newSheetId, header.length);
-  }
+  // Always re-apply formatting — idempotent and keeps re-runs visually identical.
+  await formatHeaderRow(NOTABLE_ISSUES_SHEET_ID, newSheetId, header.length);
   console.log(`${isNewTab ? 'Wrote' : 'Updated'} tab '${finalTitle}' with ${ranked.length} rows`);
 
   const tabUrl = `https://docs.google.com/spreadsheets/d/${NOTABLE_ISSUES_SHEET_ID}/edit#gid=${newSheetId}`;

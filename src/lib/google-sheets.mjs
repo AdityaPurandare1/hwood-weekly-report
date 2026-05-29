@@ -91,27 +91,82 @@ export async function clearTab(spreadsheetId, tabTitle) {
   await api('POST', `/${spreadsheetId}/values/${encodeURIComponent(tabTitle)}!A:Z:clear`);
 }
 
-// Apply the canonical "bold + grey background" formatting to row 1 of a tab,
-// matching the existing Notable Issues sheet convention.
-export async function formatHeaderRow(spreadsheetId, sheetId, numColumns) {
+// Dropdown values — ORDER MATTERS for Sheets' auto-assigned chip colors.
+// Mirrors the original Notable Issues sheet so historical and new tabs look identical.
+const STORE_OPTIONS = ['Poppy','Delilah - LA','Deliliah - Miami','The Nice Guy','Keys','Bird Streets Club'];
+const ISSUE_OPTIONS = [
+  'Product not in Craftable','Duplicate products in Craftable','Product not assigned to section',
+  'Scans as different item','Product not scanning','Sticker not scanning','No Sticker',
+  'Unknown variance','Issue','Missing','Quantity mismatch','Mislabeled','Other',
+];
+const RECURRING_OPTIONS = ['New Issue','Recurring'];
+
+function dropdownRule(values) {
+  return {
+    condition: {
+      type: 'ONE_OF_LIST',
+      values: values.map(userEnteredValue => ({ userEnteredValue })),
+    },
+    strict: false,        // accept GPT-emitted values not in the canonical list
+    showCustomUi: true,   // render as colored chip
+  };
+}
+
+// Apply the canonical formatting to a tab: bold/grey/frozen header, colored
+// dropdowns on Store/Issue/Recurring, basic filter across the data range.
+export async function formatHeaderRow(spreadsheetId, sheetId, numColumns, numRows = 1000) {
   await api('POST', `/${spreadsheetId}:batchUpdate`, {
-    requests: [{
-      repeatCell: {
-        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: numColumns },
-        cell: {
-          userEnteredFormat: {
-            backgroundColor: { red: 0.85, green: 0.85, blue: 0.85 },
-            textFormat: { bold: true },
+    requests: [
+      // 1. Bold + grey background on header row
+      {
+        repeatCell: {
+          range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: numColumns },
+          cell: {
+            userEnteredFormat: {
+              backgroundColor: { red: 0.85, green: 0.85, blue: 0.85 },
+              textFormat: { bold: true },
+            },
+          },
+          fields: 'userEnteredFormat(backgroundColor,textFormat)',
+        },
+      },
+      // 2. Freeze the header row
+      {
+        updateSheetProperties: {
+          properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
+          fields: 'gridProperties.frozenRowCount',
+        },
+      },
+      // 3. Store column dropdown (col A = index 0)
+      {
+        setDataValidation: {
+          range: { sheetId, startRowIndex: 1, endRowIndex: numRows, startColumnIndex: 0, endColumnIndex: 1 },
+          rule: dropdownRule(STORE_OPTIONS),
+        },
+      },
+      // 4. Issue column dropdown (col C = index 2)
+      {
+        setDataValidation: {
+          range: { sheetId, startRowIndex: 1, endRowIndex: numRows, startColumnIndex: 2, endColumnIndex: 3 },
+          rule: dropdownRule(ISSUE_OPTIONS),
+        },
+      },
+      // 5. Recurring column dropdown (col E = index 4)
+      {
+        setDataValidation: {
+          range: { sheetId, startRowIndex: 1, endRowIndex: numRows, startColumnIndex: 4, endColumnIndex: 5 },
+          rule: dropdownRule(RECURRING_OPTIONS),
+        },
+      },
+      // 6. Basic filter over the whole data range
+      {
+        setBasicFilter: {
+          filter: {
+            range: { sheetId, startRowIndex: 0, endRowIndex: numRows, startColumnIndex: 0, endColumnIndex: numColumns },
           },
         },
-        fields: 'userEnteredFormat(backgroundColor,textFormat)',
       },
-    }, {
-      updateSheetProperties: {
-        properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
-        fields: 'gridProperties.frozenRowCount',
-      },
-    }],
+    ],
   });
 }
 
