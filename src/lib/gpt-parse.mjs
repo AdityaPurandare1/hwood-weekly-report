@@ -40,14 +40,16 @@ For each issue found:
 { "item_name": "Full product name with size", "sku": null, "issue_type": "(see below)", "quantity": number|null, "location": "where in venue"|null, "notes": "brief description max 120 chars" }
 
 ISSUE TYPE — use the EXACT correct one. These are DIFFERENT issues:
-- "Product not scanning" = product EXISTS in Craftable but barcode won't scan. Keywords: "doesn't scan", "barcode did not scan", "not scanning", "entered manually"
-- "Product not in Craftable" = product does NOT EXIST in Craftable at all. Keywords: "not in craftable", "not in inventory", "can't find in system"
+- "Product not scanning" = product EXISTS in Craftable but barcode won't scan. Keywords: "doesn't scan", "barcode did not scan", "not scanning", "entered manually", "won't scan" (when paired with "vintage not in system", prefer "Product not in Craftable" — see below)
+- "Product not in Craftable" = product does NOT EXIST in Craftable at all. Keywords: "not in craftable", "not in inventory", "not in system", "missing from system", "missing from craftable", "can't find in system", "can't find in craftable", "vintage not in system", "year not in system", "variant not in system"
 - "Scans as different item" = barcode scans but shows wrong product. Keywords: "scans as", "scans in as"
 - "No Sticker" = no barcode sticker on the bottle
 - "Missing" = product is missing or unaccounted for
 - "Quantity mismatch" = count doesn't match expected
 - "Mislabeled" = wrong label, misspelled in system, variant issue. Keywords: "should be removed", "misspelled", "wrong variant"
 - "Other" = anything else
+
+When both "won't scan" AND "not in system/craftable/inventory" appear in the same message (very common pattern: "won't scan- vintage not in system"), prefer "Product not in Craftable" because the root cause is the missing record, not the barcode.
 
 IMPORTANT — Be aggressive about extraction:
 - "Remy Martin 1738 750ml doesnt scan" -> issue_type: "Product not scanning"
@@ -59,6 +61,15 @@ IMPORTANT — Be aggressive about extraction:
 H.Wood Group message format — staff often write: "product name, size, location, issue".
 
 GROUPED FORMAT — Staff often list an issue type or location as a header, then products underneath. ALL items under that header inherit the issue_type and location until the next header.
+
+MULTI-LINE FORMAT — When a single message spans multiple lines, the FIRST line is very often the LOCATION (e.g. "Wine tree", "Bar fridges", "Liquor rack", "Stacks", "Service well"), the MIDDLE lines describe the product (name, vintage, size), and the LAST line describes the issue and/or quantity. Example:
+  "Wine tree
+   Tyler 2023 pinot noir
+   Santa barbara county 750ml
+   2 bottles not in system"
+-> item_name: "Tyler 2023 Pinot Noir Santa Barbara County 750ml", location: "Wine tree", quantity: 2, issue_type: "Product not in Craftable", notes: "not in system"
+
+Combine multi-line product descriptions into one item_name (e.g. "Tyler 2023 pinot noir" + "Santa barbara county 750ml" -> "Tyler 2023 Pinot Noir Santa Barbara County 750ml"). NEVER leave location blank when the first line of a multi-line message looks like a venue area.
 
 ONLY skip a message if it has NO product name at all and just describes a location with a photo reference.
 
