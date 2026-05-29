@@ -86,6 +86,35 @@ export async function addTab(spreadsheetId, title) {
   return data.replies[0].addSheet.properties.sheetId;
 }
 
+// Clear all cell values in a tab (keeps the tab + its formatting).
+export async function clearTab(spreadsheetId, tabTitle) {
+  await api('POST', `/${spreadsheetId}/values/${encodeURIComponent(tabTitle)}!A:Z:clear`);
+}
+
+// Apply the canonical "bold + grey background" formatting to row 1 of a tab,
+// matching the existing Notable Issues sheet convention.
+export async function formatHeaderRow(spreadsheetId, sheetId, numColumns) {
+  await api('POST', `/${spreadsheetId}:batchUpdate`, {
+    requests: [{
+      repeatCell: {
+        range: { sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: numColumns },
+        cell: {
+          userEnteredFormat: {
+            backgroundColor: { red: 0.85, green: 0.85, blue: 0.85 },
+            textFormat: { bold: true },
+          },
+        },
+        fields: 'userEnteredFormat(backgroundColor,textFormat)',
+      },
+    }, {
+      updateSheetProperties: {
+        properties: { sheetId, gridProperties: { frozenRowCount: 1 } },
+        fields: 'gridProperties.frozenRowCount',
+      },
+    }],
+  });
+}
+
 // Write 2D array of values starting at A1 of the given tab.
 export async function writeValues(spreadsheetId, tabTitle, values) {
   if (!values || values.length === 0) return;

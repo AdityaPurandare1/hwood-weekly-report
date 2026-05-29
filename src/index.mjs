@@ -19,6 +19,9 @@ import {
   addTab,
   writeValues,
   weekTabTitle,
+  findTabByTitle,
+  clearTab,
+  formatHeaderRow,
 } from './lib/google-sheets.mjs';
 import {
   findVarianceSheetsFromPati,
@@ -158,16 +161,19 @@ async function main() {
     return { dryRun: true, total: ranked.length, byPriority };
   }
 
-  // 9. Real run — write tab + email.
-  const title = weekTabTitle();
-  let finalTitle = title;
+  // 9. Real run — write tab + email. If a tab with this title already exists
+  //    (e.g. re-running on the same day), clear it and overwrite — never duplicate.
+  const finalTitle = weekTabTitle();
+  const existing = await findTabByTitle(NOTABLE_ISSUES_SHEET_ID, finalTitle);
   let newSheetId;
-  try {
+  let isNewTab;
+  if (existing) {
+    newSheetId = existing.id;
+    isNewTab = false;
+    await clearTab(NOTABLE_ISSUES_SHEET_ID, finalTitle);
+  } else {
     newSheetId = await addTab(NOTABLE_ISSUES_SHEET_ID, finalTitle);
-  } catch (err) {
-    // Google sometimes rejects '/' in tab titles. Retry with dashes.
-    finalTitle = title.replaceAll('/', '-');
-    newSheetId = await addTab(NOTABLE_ISSUES_SHEET_ID, finalTitle);
+    isNewTab = true;
   }
 
   const header = ['Store','Product','Issue','Location','Recurring','Bottle Count','Description','Weeks Flagged','$ Exposure','Audit Status','Priority'];
@@ -186,7 +192,10 @@ async function main() {
   ])];
 
   await writeValues(NOTABLE_ISSUES_SHEET_ID, finalTitle, rows);
-  console.log(`Wrote tab '${finalTitle}' with ${ranked.length} rows`);
+  if (isNewTab) {
+    await formatHeaderRow(NOTABLE_ISSUES_SHEET_ID, newSheetId, header.length);
+  }
+  console.log(`${isNewTab ? 'Wrote' : 'Updated'} tab '${finalTitle}' with ${ranked.length} rows`);
 
   const tabUrl = `https://docs.google.com/spreadsheets/d/${NOTABLE_ISSUES_SHEET_ID}/edit#gid=${newSheetId}`;
   const sendResult = await sendReport({
