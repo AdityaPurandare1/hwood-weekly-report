@@ -62,6 +62,8 @@ GROUPED FORMAT — Staff often list an issue type or location as a header, then 
 
 ONLY skip a message if it has NO product name at all and just describes a location with a photo reference.
 
+DEFAULT RULE — when there is no explicit issue keyword in a message (no "not scanning", "not in craftable", "no sticker", "scans as", etc.) but the message clearly names a product with a location and/or quantity, classify as "Other". NEVER leave issue_type blank. Do NOT guess at a more specific category when the message doesn't say so — "Other" is the correct answer for unclassified items.
+
 When in doubt, INCLUDE the item. Combine duplicates. Return [] only if truly zero products named.
 
 CRITICAL: Return ONLY a valid JSON array. No explanation, no prose, no markdown. Just the raw JSON array starting with [ and ending with ].`;
@@ -114,5 +116,12 @@ export async function parseVenueMessages(venue, messages) {
   const raw = data?.choices?.[0]?.message?.content?.trim() ?? '';
   let parsed = safeJsonExtract(raw);
   if (!Array.isArray(parsed)) parsed = [];
-  return parsed.filter(i => i && i.item_name && isValidProductName(i.item_name));
+  return parsed
+    .filter(i => i && i.item_name && isValidProductName(i.item_name))
+    .map(i => ({
+      ...i,
+      // Safety net: if GPT left issue_type blank/missing, label as "Other"
+      // instead of an empty cell.
+      issue_type: (i.issue_type && String(i.issue_type).trim()) || 'Other',
+    }));
 }
