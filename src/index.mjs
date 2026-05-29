@@ -172,7 +172,9 @@ async function main() {
     isNewTab = false;
     await clearTab(NOTABLE_ISSUES_SHEET_ID, finalTitle);
   } else {
-    newSheetId = await addTab(NOTABLE_ISSUES_SHEET_ID, finalTitle);
+    // index=0 puts the new tab at the leftmost position — matches the
+    // historical Notable Issues sheet convention (newest week on the left).
+    newSheetId = await addTab(NOTABLE_ISSUES_SHEET_ID, finalTitle, 0);
     isNewTab = true;
   }
 

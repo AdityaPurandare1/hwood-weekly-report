@@ -76,12 +76,13 @@ export async function readLatestVarianceWeek(spreadsheetId) {
   return { week: latest.title, rows, sheetTitle: meta.title };
 }
 
-// Add a new tab to a spreadsheet. Returns the new sheetId.
-export async function addTab(spreadsheetId, title) {
+// Add a new tab to a spreadsheet. Pass index=0 to insert at the leftmost
+// position (matches the historical Notable Issues convention: newest first).
+export async function addTab(spreadsheetId, title, index) {
+  const properties = { title };
+  if (index !== undefined) properties.index = index;
   const data = await api('POST', `/${spreadsheetId}:batchUpdate`, {
-    requests: [{
-      addSheet: { properties: { title } },
-    }],
+    requests: [{ addSheet: { properties } }],
   });
   return data.replies[0].addSheet.properties.sheetId;
 }
