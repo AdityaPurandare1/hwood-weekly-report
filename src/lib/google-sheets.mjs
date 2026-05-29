@@ -186,9 +186,17 @@ export async function findTabByTitle(spreadsheetId, title) {
 
 // Build the canonical weekly-tab title from a JS Date. Mirrors existing Notable
 // Issues sheet naming: "5/26/26" style (M/D/YY) for the post-2026 tabs.
+// Tab title = the MONDAY of this week (when the count + Slack conversations
+// happen). The workflow runs Tuesday but the data is from Monday, so we name
+// the tab with the count date, not the report date. Mirrors the existing
+// historical naming convention (all weekly tabs are dated to Mondays).
 export function weekTabTitle(date = new Date()) {
-  const m = date.getMonth() + 1;
-  const d = date.getDate();
-  const y = String(date.getFullYear()).slice(-2);
-  return `${m}/${d}/${y}`;
+  const d = new Date(date);
+  const day = d.getDay();                  // 0=Sun..6=Sat
+  const offset = day === 0 ? 6 : day - 1;  // days since Monday
+  d.setDate(d.getDate() - offset);
+  const m = d.getMonth() + 1;
+  const dd = d.getDate();
+  const y = String(d.getFullYear()).slice(-2);
+  return `${m}/${dd}/${y}`;
 }
