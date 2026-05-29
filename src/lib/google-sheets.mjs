@@ -107,7 +107,7 @@ function dropdownRule(values) {
       type: 'ONE_OF_LIST',
       values: values.map(userEnteredValue => ({ userEnteredValue })),
     },
-    strict: false,        // accept GPT-emitted values not in the canonical list
+    strict: true,         // matches the original sheet — required for chip coloring
     showCustomUi: true,   // render as colored chip
   };
 }
