@@ -52,6 +52,31 @@ Slack venue channels ──► GPT parse ─┘
 > prefix, so the secret is named `GH_MODELS_TOKEN` and the workflow maps it onto
 > the `GITHUB_MODELS_TOKEN` env var the script expects.
 
+## Re-authing the Google token
+
+If a run fails with `invalid_grant: Token has been expired or revoked`, the
+`GOOGLE_REFRESH_TOKEN` is dead.
+
+**Root cause / permanent fix (do once):** if the OAuth consent screen is in
+**Testing** mode, Google expires every refresh token after **7 days**. In Google
+Cloud Console → **APIs & Services → OAuth consent screen → "Publish app"**
+(Testing → In production). The `spreadsheets` scope is *sensitive* (not
+*restricted*) for a single internal user, so no Google verification is needed —
+you just click through the "unverified app" screen once during re-auth. After
+publishing, refresh tokens no longer expire on a timer.
+
+**Mint a fresh token** (needs `GOOGLE_CLIENT_ID`/`GOOGLE_CLIENT_SECRET` in your
+environment or a local `.env`, and the GitHub CLI authenticated for this repo):
+
+```
+npm run mint-token              # opens Google consent, then writes the new GOOGLE_REFRESH_TOKEN secret (token never printed)
+npm run mint-token -- --print   # alternative: print the token so you set the secret yourself
+```
+
+Then re-run the workflow: `gh workflow run "Weekly Notable Issues Report"`.
+(If you hit `redirect_uri_mismatch`, use a Desktop-app OAuth client, or add
+`http://localhost:4117` to the client's Authorized redirect URIs.)
+
 ## Required Repository Variables (non-secret config)
 
 Configured under Settings -> Secrets and variables -> Actions -> Variables.

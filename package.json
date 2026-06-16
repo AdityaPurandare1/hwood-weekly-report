@@ -6,7 +6,8 @@
   "private": true,
   "scripts": {
     "start": "node src/index.mjs",
-    "test": "node src/index.mjs --dry-run"
+    "test": "node src/index.mjs --dry-run",
+    "mint-token": "node scripts/mint-google-token.mjs"
   },
   "engines": {
     "node": ">=20"
