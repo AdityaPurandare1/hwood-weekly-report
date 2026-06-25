@@ -20,7 +20,8 @@
 //   node scripts/mint-google-token.mjs --print    # mint + print to stdout instead (you set the secret)
 //   node scripts/mint-google-token.mjs --repo owner/name --port 4117
 //
-//   Reads GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET from the environment or a local .env file.
+//   Reads GOOGLE_CLIENT_ID / GOOGLE_CLIENT_SECRET from the environment or a local
+//   .env.local (preferred) or .env file.
 //   Requires the GitHub CLI (`gh`) authenticated for the target repo (unless --print).
 //
 // NOTE on redirect URI: this uses http://localhost:<port>. If you see
@@ -46,12 +47,16 @@ const PRINT_ONLY = process.argv.includes("--print");
 const REPO = flagValue("repo", DEFAULT_REPO);
 const PORT = Number(flagValue("port", DEFAULT_PORT));
 
-// Load a local .env (no dependency) so the client id/secret can live there.
+// Load a local env file (no dependency) so the client id/secret can live there.
+// Checks .env.local first (this repo's actual filename) then .env. Earlier files
+// win, and an explicit process.env always wins over both.
 function loadDotEnv() {
-  if (!existsSync(".env")) return;
-  for (const line of readFileSync(".env", "utf8").split(/\r?\n/)) {
-    const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
-    if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, "");
+  for (const file of [".env.local", ".env"]) {
+    if (!existsSync(file)) continue;
+    for (const line of readFileSync(file, "utf8").split(/\r?\n/)) {
+      const m = line.match(/^\s*([A-Z0-9_]+)\s*=\s*(.*?)\s*$/);
+      if (m && process.env[m[1]] === undefined) process.env[m[1]] = m[2].replace(/^['"]|['"]$/g, "");
+    }
   }
 }
 loadDotEnv();

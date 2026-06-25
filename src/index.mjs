@@ -63,13 +63,20 @@ async function main() {
     throw new Error('Missing NOTABLE_ISSUES_SHEET_ID env var');
   }
 
-  // 1. Timezone guard — only run when local LA hour is within ±1 of GUARD_HOUR.
-  const skipGuard = DRY_RUN || process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
+  // 1. Timezone guard — only skip if it's still EARLIER than the target hour
+  //    locally. We deliberately do NOT cap the late side: GitHub Actions routinely
+  //    delays scheduled runs by 1–3h (sometimes more), so a tight ±1h window made
+  //    every scheduled run land after the band and skip. Letting late runs through
+  //    is safe because the real-run path below is idempotent (tab overwrite) and
+  //    emails exactly-once per week (see `shouldEmail`), so a delayed or duplicate
+  //    firing won't double-write or double-send.
+  const isManual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
+  const skipGuard = DRY_RUN || isManual;
   if (!skipGuard) {
     const guardHour = Number(process.env.GUARD_HOUR ?? 10);
     const hour = laHour();
-    if (hour < guardHour - 1 || hour > guardHour + 1) {
-      console.log('::notice::Skipping — not the right hour locally');
+    if (hour < guardHour - 1) {
+      console.log('::notice::Skipping — too early locally (before guard hour)');
       return { skipped: true };
     }
   }
@@ -198,14 +205,23 @@ async function main() {
   await formatHeaderRow(NOTABLE_ISSUES_SHEET_ID, newSheetId, header.length);
   console.log(`${isNewTab ? 'Wrote' : 'Updated'} tab '${finalTitle}' with ${ranked.length} rows`);
 
+  // Email exactly-once per week. A scheduled run only emails when it CREATED this
+  // week's tab; a redundant/delayed scheduled firing finds the tab already there
+  // and overwrites it silently without re-emailing. Manual runs always email so a
+  // deliberate re-run after fixing data still notifies recipients.
+  const shouldEmail = isNewTab || isManual;
   const tabUrl = `https://docs.google.com/spreadsheets/d/${NOTABLE_ISSUES_SHEET_ID}/edit#gid=${newSheetId}`;
-  const sendResult = await sendReport({
-    tabTitle: finalTitle,
-    tabUrl,
-    rowCount: ranked.length,
-    byPriority,
-  });
-  console.log(`Emailed report to ${sendResult.sentTo} recipient(s)`);
+  if (shouldEmail) {
+    const sendResult = await sendReport({
+      tabTitle: finalTitle,
+      tabUrl,
+      rowCount: ranked.length,
+      byPriority,
+    });
+    console.log(`Emailed report to ${sendResult.sentTo} recipient(s)`);
+  } else {
+    console.log(`Tab already existed this week — skipped email (no duplicate send)`);
+  }
 
   return { total: ranked.length, byPriority, venuesWithIssues: new Set(notableIssues.map(i => i.venue)).size };
 }
