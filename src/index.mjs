@@ -84,25 +84,37 @@ async function main() {
   // 2. Discover Pati's variance sheets from her DM.
   const varianceSheets = await logGroupAsync('Discover variance sheets', async () => {
     const map = await findVarianceSheetsFromPati(7);
-    console.log(`Found ${Object.keys(map).length} variance sheets`);
+    const venues = Object.keys(map);
+    console.log(`Found ${venues.length} variance sheets from Pati: ${venues.join(', ') || '(none)'}`);
+    for (const v of VENUES) {
+      if (!map[v]) console.log(`::warning::No variance sheet from Pati this week for: ${v}`);
+    }
     return map;
   });
 
   // 3. Read variance per venue. Skip venues whose sheet isn't shared with us —
-  //    one inaccessible venue shouldn't kill the whole run.
+  //    one inaccessible venue shouldn't kill the whole run. We log the HTTP
+  //    status per venue so a 403 (not shared with our account) is distinguishable
+  //    from a 404 (wrong sheet id) when triaging "Pati's report wasn't considered".
   const varianceByVenue = await logGroupAsync('Read variance per venue', async () => {
     const result = {};
-    let skipped = 0;
+    const skippedVenues = [];
     for (const [venue, sheetId] of Object.entries(varianceSheets)) {
       try {
         const { rows } = await readLatestVarianceWeek(sheetId);
         result[venue] = parseVarianceRows(rows);
+        console.log(`${venue}: variance read OK (${result[venue].length} rows)`);
       } catch (err) {
-        skipped++;
-        console.log(`::warning::Variance read skipped for one venue (sheet inaccessible — likely a share-permission issue)`);
+        skippedVenues.push(venue);
+        const status = String(err?.message || '').match(/->\s*(\d{3})/)?.[1] ?? '???';
+        const reason = status === '403' ? 'not shared with our Google account'
+          : status === '404' ? 'sheet id not found'
+          : `HTTP ${status}`;
+        console.log(`::warning::${venue}: variance NOT considered — ${reason} (status ${status})`);
       }
     }
-    console.log(`Read variance for ${Object.keys(result).length} venues${skipped ? `, skipped ${skipped}` : ''}`);
+    console.log(`Variance considered for ${Object.keys(result).length}/${Object.keys(varianceSheets).length} venues` +
+      (skippedVenues.length ? `; skipped: ${skippedVenues.join(', ')}` : ''));
     return result;
   });
 
@@ -112,8 +124,12 @@ async function main() {
     let venuesWithIssues = 0;
     for (const venue of VENUES) {
       const messages = await pullVenueMessages(venue, 7);
-      if (!messages.length) continue;
+      if (!messages.length) {
+        console.log(`::warning::${venue}: 0 Slack messages in window — nothing to parse (check the channel mapping if unexpected)`);
+        continue;
+      }
       const parsed = await parseVenueMessages(venue, messages);
+      console.log(`${venue}: ${messages.length} messages -> ${parsed.length} parsed issues`);
       if (parsed.length) venuesWithIssues++;
       for (const p of parsed) {
         issues.push({
