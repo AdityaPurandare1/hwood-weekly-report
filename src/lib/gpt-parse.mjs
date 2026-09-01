@@ -1,9 +1,52 @@
-// GPT-4o-mini parser via GitHub Models (Azure inference endpoint).
+// Slack-message issue parser via the Google Gemini API (AI Studio free tier).
 // Mirrors the prompt + filters used in inventory-workflow/index.html, but server-side.
 // Reads no images — text-only parsing for v1. Image parsing can come later if needed.
+//
+// Previously ran on GitHub Models (gpt-4o-mini). That service was retired in Aug 2026
+// (410 github_models_retirement_brownout), which broke every run from 2026-08-04 on.
+// Gemini 2.5 Flash is the replacement: free tier, no billing card, 10 RPM / 250 RPD —
+// far above this pipeline's ~6 calls per weekly run.
 
-const ENDPOINT = 'https://models.inference.ai.azure.com/chat/completions';
-const MODEL = 'gpt-4o-mini';
+const MODEL = 'gemini-2.5-flash';
+const ENDPOINT =
+  `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
+
+const ISSUE_TYPES = [
+  'Product not scanning',
+  'Product not in Craftable',
+  'Scans as different item',
+  'No Sticker',
+  'Missing',
+  'Quantity mismatch',
+  'Mislabeled',
+  'Other',
+];
+
+// Gemini structured-output schema (OpenAPI subset). Constrains the model to emit
+// exactly the shape joinAndRank expects, so no prose/fence stripping is needed.
+// NOTE: this subset supports `enum` but NOT numeric bounds (minimum/maximum) —
+// adding those makes the request 400.
+const RESPONSE_SCHEMA = {
+  type: 'OBJECT',
+  properties: {
+    issues: {
+      type: 'ARRAY',
+      items: {
+        type: 'OBJECT',
+        properties: {
+          item_name: { type: 'STRING' },
+          issue_type: { type: 'STRING', enum: ISSUE_TYPES },
+          quantity: { type: 'INTEGER', nullable: true },
+          location: { type: 'STRING', nullable: true },
+          notes: { type: 'STRING', nullable: true },
+        },
+        required: ['item_name', 'issue_type'],
+        propertyOrdering: ['item_name', 'issue_type', 'quantity', 'location', 'notes'],
+      },
+    },
+  },
+  required: ['issues'],
+};
 
 const SIZE_TOKENS = new Set([
   '750ml','1l','375ml','700ml','1000ml','500ml','200ml','187ml','15l','175l',
@@ -80,15 +123,29 @@ When in doubt, INCLUDE the item. Combine duplicates. Return [] only if truly zer
 CRITICAL: Return ONLY a valid JSON array. No explanation, no prose, no markdown. Just the raw JSON array starting with [ and ending with ].`;
 }
 
+// Accepts either the schema shape ({ issues: [...] }) or a bare array, so a
+// fallback/no-schema response still parses. Fence + prose stripping is retained
+// as a belt-and-braces path.
+function normalizeIssues(value) {
+  if (Array.isArray(value)) return value;
+  if (value && Array.isArray(value.issues)) return value.issues;
+  return [];
+}
+
 function safeJsonExtract(raw) {
   if (!raw) return [];
   // Strip code fences
   const stripped = raw.replace(/```json|```/g, '').trim();
-  try { return JSON.parse(stripped); } catch {}
+  try { return normalizeIssues(JSON.parse(stripped)); } catch {}
   // Find a bracketed array
   const arr = raw.match(/\[[\s\S]*\]/);
   if (arr) {
-    try { return JSON.parse(arr[0]); } catch {}
+    try { return normalizeIssues(JSON.parse(arr[0])); } catch {}
+  }
+  // Find a bracketed object
+  const obj = raw.match(/\{[\s\S]*\}/);
+  if (obj) {
+    try { return normalizeIssues(JSON.parse(obj[0])); } catch {}
   }
   return [];
 }
@@ -97,8 +154,8 @@ function safeJsonExtract(raw) {
 // Returns array of { item_name, issue_type, quantity, location, notes }
 export async function parseVenueMessages(venue, messages) {
   if (!messages || messages.length === 0) return [];
-  const token = process.env.GITHUB_MODELS_TOKEN;
-  if (!token) throw new Error('Missing GITHUB_MODELS_TOKEN env var');
+  const token = process.env.GEMINI_API_KEY;
+  if (!token) throw new Error('Missing GEMINI_API_KEY env var');
 
   const text = messages.join('\n\n---\n\n');
   const sysPrompt = buildSystemPrompt(venue);
@@ -107,24 +164,42 @@ export async function parseVenueMessages(venue, messages) {
     method: 'POST',
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
+      'x-goog-api-key': token,
     },
     body: JSON.stringify({
-      model: MODEL,
-      temperature: 0.3,
-      max_tokens: 4000,
-      messages: [
-        { role: 'system', content: sysPrompt },
-        { role: 'user',   content: text },
-      ],
+      systemInstruction: { parts: [{ text: sysPrompt }] },
+      contents: [{ role: 'user', parts: [{ text }] }],
+      generationConfig: {
+        temperature: 0.3,
+        maxOutputTokens: 8000,
+        responseMimeType: 'application/json',
+        responseSchema: RESPONSE_SCHEMA,
+        // Extraction, not reasoning — thinking tokens would just eat the output
+        // budget and risk a MAX_TOKENS truncation mid-array.
+        thinkingConfig: { thinkingBudget: 0 },
+      },
     }),
   });
   if (!res.ok) {
     const t = await res.text();
-    throw new Error(`GitHub Models ${res.status}: ${t.slice(0, 200)}`);
+    throw new Error(`Gemini ${res.status}: ${t.slice(0, 200)}`);
   }
   const data = await res.json();
-  const raw = data?.choices?.[0]?.message?.content?.trim() ?? '';
+
+  // A prompt blocked by safety filters comes back 200 with no candidate.
+  const candidate = data?.candidates?.[0];
+  const blockReason = data?.promptFeedback?.blockReason;
+  if (!candidate && blockReason) {
+    throw new Error(`Gemini blocked the prompt: ${blockReason}`);
+  }
+  if (candidate?.finishReason && !['STOP', 'MAX_TOKENS'].includes(candidate.finishReason)) {
+    throw new Error(`Gemini stopped early: ${candidate.finishReason}`);
+  }
+
+  const raw = (candidate?.content?.parts ?? [])
+    .map(p => p?.text ?? '')
+    .join('')
+    .trim();
   let parsed = safeJsonExtract(raw);
   if (!Array.isArray(parsed)) parsed = [];
   return parsed

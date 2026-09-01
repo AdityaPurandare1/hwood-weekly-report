@@ -9,34 +9,48 @@ import { parseVenueMessages } from '../src/lib/gpt-parse.mjs';
 // ---- helpers ----------------------------------------------------------------
 
 const ORIGINAL_FETCH = globalThis.fetch;
-const ORIGINAL_TOKEN = process.env.GITHUB_MODELS_TOKEN;
+const ORIGINAL_TOKEN = process.env.GEMINI_API_KEY;
 
 function setTokenForTest() {
-  process.env.GITHUB_MODELS_TOKEN = 'test-token';
+  process.env.GEMINI_API_KEY = 'test-token';
 }
 
 function restoreEnv() {
-  if (ORIGINAL_TOKEN === undefined) delete process.env.GITHUB_MODELS_TOKEN;
-  else process.env.GITHUB_MODELS_TOKEN = ORIGINAL_TOKEN;
+  if (ORIGINAL_TOKEN === undefined) delete process.env.GEMINI_API_KEY;
+  else process.env.GEMINI_API_KEY = ORIGINAL_TOKEN;
 }
 
 function restoreFetch() {
   globalThis.fetch = ORIGINAL_FETCH;
 }
 
-// Helper to build a stub fetch that returns a fake GPT response with the given
-// raw assistant content string.
-function stubGptResponse(rawContent, { ok = true, status = 200 } = {}) {
+// Helper to build a stub fetch that returns a fake Gemini response carrying the
+// given raw model output string.
+function stubGptResponse(rawContent, { ok = true, status = 200, finishReason = 'STOP' } = {}) {
   globalThis.fetch = async () => ({
     ok,
     status,
     async json() {
       return {
-        choices: [{ message: { content: rawContent } }],
+        candidates: [{ finishReason, content: { parts: [{ text: rawContent }] } }],
       };
     },
     async text() {
       return rawContent;
+    },
+  });
+}
+
+// Stub for responses with no candidate (e.g. prompt blocked by safety filters).
+function stubGeminiBlocked(blockReason) {
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return { promptFeedback: { blockReason } };
+    },
+    async text() {
+      return '';
     },
   });
 }
@@ -60,12 +74,12 @@ test('parseVenueMessages: empty messages array returns [] without calling fetch'
   }
 });
 
-test('parseVenueMessages: throws when GITHUB_MODELS_TOKEN is missing', async () => {
-  delete process.env.GITHUB_MODELS_TOKEN;
+test('parseVenueMessages: throws when GEMINI_API_KEY is missing', async () => {
+  delete process.env.GEMINI_API_KEY;
   try {
     await assert.rejects(
       () => parseVenueMessages('Test Venue', ['something']),
-      /Missing GITHUB_MODELS_TOKEN/,
+      /Missing GEMINI_API_KEY/,
     );
   } finally {
     restoreEnv();
@@ -197,6 +211,94 @@ test('parseVenueMessages: when GPT returns a non-array (object), returns []', as
   try {
     const out = await parseVenueMessages('Test Venue', ['msg1']);
     assert.deepEqual(out, []);
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});
+
+test('parseVenueMessages: schema-shaped { issues: [...] } response is unwrapped', async () => {
+  setTokenForTest();
+  stubGptResponse(JSON.stringify({
+    issues: [
+      { item_name: 'Test Item 750ml', issue_type: 'Missing', quantity: 2, location: 'Bar', notes: 'x' },
+    ],
+  }));
+  try {
+    const out = await parseVenueMessages('Test Venue', ['msg1']);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].item_name, 'Test Item 750ml');
+    assert.equal(out[0].quantity, 2);
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});
+
+test('parseVenueMessages: multi-part response text is concatenated before parsing', async () => {
+  setTokenForTest();
+  const payload = JSON.stringify({ issues: [{ item_name: 'Test Item 750ml', issue_type: 'Missing' }] });
+  const mid = Math.floor(payload.length / 2);
+  globalThis.fetch = async () => ({
+    ok: true,
+    status: 200,
+    async json() {
+      return {
+        candidates: [{
+          finishReason: 'STOP',
+          content: { parts: [{ text: payload.slice(0, mid) }, { text: payload.slice(mid) }] },
+        }],
+      };
+    },
+    async text() { return payload; },
+  });
+  try {
+    const out = await parseVenueMessages('Test Venue', ['msg1']);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].item_name, 'Test Item 750ml');
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});
+
+test('parseVenueMessages: blank issue_type defaults to "Other"', async () => {
+  setTokenForTest();
+  stubGptResponse(JSON.stringify({
+    issues: [{ item_name: 'Test Item 750ml', issue_type: '  ' }],
+  }));
+  try {
+    const out = await parseVenueMessages('Test Venue', ['msg1']);
+    assert.equal(out.length, 1);
+    assert.equal(out[0].issue_type, 'Other');
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});
+
+test('parseVenueMessages: safety-blocked prompt throws with the block reason', async () => {
+  setTokenForTest();
+  stubGeminiBlocked('SAFETY');
+  try {
+    await assert.rejects(
+      () => parseVenueMessages('Test Venue', ['msg1']),
+      /Gemini blocked the prompt: SAFETY/,
+    );
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});
+
+test('parseVenueMessages: abnormal finishReason throws', async () => {
+  setTokenForTest();
+  stubGptResponse('', { finishReason: 'RECITATION' });
+  try {
+    await assert.rejects(
+      () => parseVenueMessages('Test Venue', ['msg1']),
+      /Gemini stopped early: RECITATION/,
+    );
   } finally {
     restoreFetch();
     restoreEnv();

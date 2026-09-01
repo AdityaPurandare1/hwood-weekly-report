@@ -42,15 +42,19 @@ Slack venue channels ──► GPT parse ─┘
 | `GOOGLE_CLIENT_SECRET` | Google Cloud Console OAuth client | `GOCSPX-...` |
 | `GOOGLE_REFRESH_TOKEN` | OAuth playground or local script, scope `spreadsheets` | `1//0g...` |
 | `SLACK_TOKEN` | Slack user token (xoxp) with `channels:history`, `groups:history`, `im:history`, `conversations.list` | `xoxp-...` |
-| `GH_MODELS_TOKEN` | GitHub PAT with `models:read` scope (re-exposed to the script as `GITHUB_MODELS_TOKEN`) | `ghp_...` |
+| `GEMINI_API_KEY` | Google AI Studio -> "Get API key" (free tier, no billing card) | `AIza...` |
 | `RESEND_API_KEY` | Resend dashboard | `re_...` |
 | `PATI_DM_CHANNEL_ID` | Open Pati's DM in Slack -> click her profile -> "Channel ID" at the bottom | `D0XXXXXXXXX` |
 | `NOTABLE_ISSUES_SHEET_ID` | The `/d/<id>/` segment of the Notable Issues sheet URL | 44-char alphanumeric |
 | `EMAIL_RECIPIENTS` | Comma-separated list of recipient addresses | `a@x.com,b@y.com` |
 
-> **Note on `GH_MODELS_TOKEN`** — GitHub forbids secret names with the `GITHUB_`
-> prefix, so the secret is named `GH_MODELS_TOKEN` and the workflow maps it onto
-> the `GITHUB_MODELS_TOKEN` env var the script expects.
+> **Note on `GEMINI_API_KEY`** — the message parser ran on GitHub Models
+> (`gpt-4o-mini`) until that service was retired in Aug 2026; every run from
+> 2026-08-04 failed with `GitHub Models 404` / `410 retirement_brownout`. It now
+> runs on Gemini 2.5 Flash via the AI Studio **free tier** — no billing card, and
+> the limits (10 req/min, 250 req/day) sit far above this pipeline's ~6 calls per
+> weekly run. Get a key at <https://aistudio.google.com/apikey>. The old
+> `GH_MODELS_TOKEN` secret is no longer read and can be deleted.
 
 ## Re-authing the Google token
 
@@ -118,7 +122,7 @@ GOOGLE_CLIENT_ID=xxx.apps.googleusercontent.com
 GOOGLE_CLIENT_SECRET=GOCSPX-xxx
 GOOGLE_REFRESH_TOKEN=1//0gxxx
 SLACK_TOKEN=xoxp-xxx
-GITHUB_MODELS_TOKEN=ghp_xxx
+GEMINI_API_KEY=AIzaxxx
 RESEND_API_KEY=re_xxx
 PATI_DM_CHANNEL_ID=D0XXXXXXXXX
 NOTABLE_ISSUES_SHEET_ID=<44-char id>
@@ -145,8 +149,9 @@ the email — and double-check the recipient list before you do.
   `readRange`, `readLatestVarianceWeek`, `addTab`, `writeValues`, `weekTabTitle`.
 - `src/lib/slack.mjs` — Slack Web API wrapper. Reads Pati's DM, resolves venue
   channel names to IDs, pulls message history.
-- `src/lib/gpt-parse.mjs` — GitHub Models / `gpt-4o-mini` parser. Same system
-  prompt and validation as the live inventory-workflow web app.
+- `src/lib/gpt-parse.mjs` — Gemini 2.5 Flash parser (structured output via
+  `responseSchema`). Same system prompt and validation as the live
+  inventory-workflow web app. Filename kept from the GitHub Models era.
 - `src/lib/join.mjs` — variance match, weeks-flagged aging, priority assignment,
   ranking. No I/O — pure functions.
 - `src/lib/email.mjs` — Resend wrapper. Recipient addresses never appear in
