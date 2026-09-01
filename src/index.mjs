@@ -11,14 +11,20 @@ import {
   VENUES,
   NOTABLE_ISSUES_SHEET_ID,
   DRY_RUN,
+  TARGET_WEEK,
+  SKIP_EMAIL,
 } from './config.mjs';
 import {
   getSheetMetadata,
   readRange,
   readLatestVarianceWeek,
+  readVarianceWeekFor,
   addTab,
   writeValues,
   weekTabTitle,
+  mondayOf,
+  slackWindowForWeek,
+  parseVarianceTabDate,
   findTabByTitle,
   clearTab,
   formatHeaderRow,
@@ -70,8 +76,18 @@ async function main() {
   //    is safe because the real-run path below is idempotent (tab overwrite) and
   //    emails exactly-once per week (see `shouldEmail`), so a delayed or duplicate
   //    firing won't double-write or double-send.
+  // Backfill mode reconstructs a PAST week's tab. Everything downstream keys off
+  // `targetMonday` + `slackWindow`; a normal run just uses this week and the
+  // plain 7-day lookback, so the two paths stay one code path.
+  const isBackfill = TARGET_WEEK !== null;
+  const targetMonday = mondayOf(TARGET_WEEK ?? new Date());
+  const slackWindow = isBackfill ? slackWindowForWeek(targetMonday) : 7;
+  if (isBackfill) {
+    console.log(`::notice::Backfill mode — rebuilding week of ${weekTabTitle(targetMonday)}`);
+  }
+
   const isManual = process.env.GITHUB_EVENT_NAME === 'workflow_dispatch';
-  const skipGuard = DRY_RUN || isManual;
+  const skipGuard = DRY_RUN || isManual || isBackfill;
   if (!skipGuard) {
     const guardHour = Number(process.env.GUARD_HOUR ?? 10);
     const hour = laHour();
@@ -82,12 +98,17 @@ async function main() {
   }
 
   // 2. Discover Pati's variance sheets from her DM.
+  //    Backfill widens the DM lookback: the variance SPREADSHEET ids are stable
+  //    per venue (Pati adds a tab per week to the same file), so any recent share
+  //    resolves the right file — we then pick the target week's tab from inside it.
   const varianceSheets = await logGroupAsync('Discover variance sheets', async () => {
-    const map = await findVarianceSheetsFromPati(7);
+    const map = await findVarianceSheetsFromPati(isBackfill ? 60 : 7);
     const venues = Object.keys(map);
     console.log(`Found ${venues.length} variance sheets from Pati: ${venues.join(', ') || '(none)'}`);
     for (const v of VENUES) {
-      if (!map[v]) console.log(`::warning::No variance sheet from Pati this week for: ${v}`);
+      if (!map[v]) {
+        console.log(`::warning::No variance sheet from Pati ${isBackfill ? 'in the last 60 days' : 'this week'} for: ${v}`);
+      }
     }
     return map;
   });
@@ -101,9 +122,15 @@ async function main() {
     const skippedVenues = [];
     for (const [venue, sheetId] of Object.entries(varianceSheets)) {
       try {
-        const { rows } = await readLatestVarianceWeek(sheetId);
+        const { week, rows } = isBackfill
+          ? await readVarianceWeekFor(sheetId, targetMonday)
+          : await readLatestVarianceWeek(sheetId);
+        if (isBackfill && week === null) {
+          console.log(`::warning::${venue}: no variance tab for the target week — issues will carry no $ exposure`);
+          continue;
+        }
         result[venue] = parseVarianceRows(rows);
-        console.log(`${venue}: variance read OK (${result[venue].length} rows)`);
+        console.log(`${venue}: variance read OK (${result[venue].length} rows${isBackfill ? `, tab '${week}'` : ''})`);
       } catch (err) {
         skippedVenues.push(venue);
         const status = String(err?.message || '').match(/->\s*(\d{3})/)?.[1] ?? '???';
@@ -123,7 +150,7 @@ async function main() {
     const issues = [];
     let venuesWithIssues = 0;
     for (const venue of VENUES) {
-      const messages = await pullVenueMessages(venue, 7);
+      const messages = await pullVenueMessages(venue, slackWindow);
       if (!messages.length) {
         console.log(`::warning::${venue}: 0 Slack messages in window — nothing to parse (check the channel mapping if unexpected)`);
         continue;
@@ -149,7 +176,17 @@ async function main() {
   // 5. Read prior 4 weekly tabs for aging.
   const priorWeekIssues = await logGroupAsync('Read prior weekly tabs', async () => {
     const meta = await getSheetMetadata(NOTABLE_ISSUES_SHEET_ID);
-    const datedTabs = meta.tabs.filter(t => /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(t.title));
+    let datedTabs = meta.tabs.filter(t => /^\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/.test(t.title));
+    // Aging must only look BACKWARDS. On a normal run the newest 4 tabs are the
+    // prior weeks by construction, but a backfill runs with later weeks possibly
+    // already present, so drop anything at or after the target week. This also
+    // makes backfills order-independent and safe to re-run.
+    if (isBackfill) {
+      datedTabs = datedTabs.filter(t => {
+        const d = parseVarianceTabDate(t.title, targetMonday);
+        return d && d < targetMonday;
+      });
+    }
     const priorTabs = datedTabs.slice(0, 4);
     const tabResults = [];
     for (const t of priorTabs) {
@@ -186,7 +223,7 @@ async function main() {
 
   // 9. Real run — write tab + email. If a tab with this title already exists
   //    (e.g. re-running on the same day), clear it and overwrite — never duplicate.
-  const finalTitle = weekTabTitle();
+  const finalTitle = weekTabTitle(targetMonday);
   const existing = await findTabByTitle(NOTABLE_ISSUES_SHEET_ID, finalTitle);
   let newSheetId;
   let isNewTab;
@@ -197,6 +234,7 @@ async function main() {
   } else {
     // index=0 puts the new tab at the leftmost position — matches the
     // historical Notable Issues sheet convention (newest week on the left).
+    // Backfills run oldest-first so this convention still holds afterwards.
     newSheetId = await addTab(NOTABLE_ISSUES_SHEET_ID, finalTitle, 0);
     isNewTab = true;
   }
@@ -225,7 +263,9 @@ async function main() {
   // week's tab; a redundant/delayed scheduled firing finds the tab already there
   // and overwrites it silently without re-emailing. Manual runs always email so a
   // deliberate re-run after fixing data still notifies recipients.
-  const shouldEmail = isNewTab || isManual;
+  // Backfills stay silent unless --email is passed: rebuilding five missed weeks
+  // should not fire five "this week's report" notifications at the recipients.
+  const shouldEmail = (isNewTab || isManual) && !SKIP_EMAIL;
   const tabUrl = `https://docs.google.com/spreadsheets/d/${NOTABLE_ISSUES_SHEET_ID}/edit#gid=${newSheetId}`;
   if (shouldEmail) {
     const sendResult = await sendReport({
@@ -235,6 +275,8 @@ async function main() {
       byPriority,
     });
     console.log(`Emailed report to ${sendResult.sentTo} recipient(s)`);
+  } else if (SKIP_EMAIL) {
+    console.log(`Backfill run — skipped email (pass --email to send)`);
   } else {
     console.log(`Tab already existed this week — skipped email (no duplicate send)`);
   }

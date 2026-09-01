@@ -50,3 +50,29 @@ export const EMAIL_RECIPIENTS = (process.env.EMAIL_RECIPIENTS ?? '')
 
 // Misc
 export const DRY_RUN = process.argv.includes('--dry-run');
+
+// Backfill support — `--week=YYYY-MM-DD` regenerates the tab for a PAST week
+// instead of the current one. Used to fill the gap left by a stretch of failed
+// runs. The date may be any day in the target week; it is normalised to that
+// week's Monday (the count date, which is what tabs are named after).
+//
+// Parsed from explicit components rather than `new Date(str)` so the week is
+// interpreted in the runner's local zone — `new Date('2026-08-03')` is UTC
+// midnight, which lands on the previous day (and thus the previous WEEK) for
+// any runner behind UTC.
+function parseTargetWeek() {
+  const arg = process.argv.find(a => a.startsWith('--week='));
+  if (!arg) return null;
+  const raw = arg.slice('--week='.length).trim();
+  const m = raw.match(/^(\d{4})-(\d{1,2})-(\d{1,2})$/);
+  if (!m) throw new Error(`Invalid --week value '${raw}' — expected YYYY-MM-DD`);
+  const d = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+  if (Number.isNaN(d.getTime())) throw new Error(`Invalid --week date '${raw}'`);
+  return d;
+}
+
+export const TARGET_WEEK = parseTargetWeek();
+
+// Backfilled weeks don't email by default — regenerating five missed weeks
+// should not fire five "this week's report" notifications. `--email` forces it.
+export const SKIP_EMAIL = TARGET_WEEK !== null && !process.argv.includes('--email');

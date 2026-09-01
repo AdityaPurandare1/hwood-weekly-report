@@ -30,15 +30,32 @@ async function slack(method, params = {}, opts = {}) {
   return data;
 }
 
-// Pull messages from a channel within the last N days.
-async function readChannelHistory(channelId, daysBack = 7) {
-  const oldest = Math.floor((Date.now() - daysBack * 86400_000) / 1000);
+// Resolve a lookback spec into Slack's {oldest, latest} epoch-second bounds.
+//
+// `window` is either a number of days back from now (the weekly-run case) or an
+// explicit { oldest: Date, latest: Date } pair (the backfill case, where we need
+// a CLOSED window around a past week rather than everything since a start date).
+function historyBounds(window) {
+  if (window && typeof window === 'object') {
+    return {
+      oldest: String(Math.floor(window.oldest.getTime() / 1000)),
+      latest: String(Math.floor(window.latest.getTime() / 1000)),
+    };
+  }
+  const daysBack = window ?? 7;
+  return { oldest: String(Math.floor((Date.now() - daysBack * 86400_000) / 1000)) };
+}
+
+// Pull messages from a channel within the last N days, or within an explicit
+// { oldest, latest } Date window.
+async function readChannelHistory(channelId, window = 7) {
+  const bounds = historyBounds(window);
   const messages = [];
   let cursor;
   for (let i = 0; i < 5; i++) { // hard cap on pagination
     const data = await slack('conversations.history', {
       channel: channelId,
-      oldest: String(oldest),
+      ...bounds,
       limit: '100',
       ...(cursor ? { cursor } : {}),
     });
@@ -70,11 +87,11 @@ function venueFromTitle(title) {
 // Pati shares Google Sheets via Drive integration, so they show up in msg.files[]
 // as filetype=gsheet, external_type=gdrive. We also fall back to attachment unfurls
 // in case she ever pastes a URL directly.
-export async function findVarianceSheetsFromPati(daysBack = 7) {
+export async function findVarianceSheetsFromPati(window = 7) {
   if (!PATI_DM_CHANNEL_ID) {
     throw new Error('Missing PATI_DM_CHANNEL_ID env var (her DM channel ID, starts with "D")');
   }
-  const messages = await readChannelHistory(PATI_DM_CHANNEL_ID, daysBack);
+  const messages = await readChannelHistory(PATI_DM_CHANNEL_ID, window);
 
   const result = {};
   // Walk newest-first; first match per venue wins (most recent share).
@@ -128,11 +145,11 @@ async function resolveChannelId(channelName) {
 
 // Pull plain-text messages from a venue's inventory channel.
 // Returns array of message strings (no attachments — those are a future enhancement).
-export async function pullVenueMessages(venue, daysBack = 7) {
+export async function pullVenueMessages(venue, window = 7) {
   const channelName = VENUE_SLACK_CHANNELS[venue];
   if (!channelName) return [];
   const channelId = await resolveChannelId(channelName);
-  const messages = await readChannelHistory(channelId, daysBack);
+  const messages = await readChannelHistory(channelId, window);
   return messages
     .filter(m => m.type === 'message' && !m.subtype && m.text)
     .map(m => m.text);

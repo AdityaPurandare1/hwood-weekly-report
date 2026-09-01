@@ -12,6 +12,14 @@ on:
         description: 'Dry run (skip writing tab + sending email)'
         type: boolean
         default: false
+      week:
+        description: 'Backfill a past week (YYYY-MM-DD, any day in that week). Blank = current week.'
+        type: string
+        default: ''
+      send_email:
+        description: 'Send the email on a backfill run (normally suppressed)'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -47,9 +55,15 @@ jobs:
           SLACK_CHANNEL_POPPY:         ${{ vars.SLACK_CHANNEL_POPPY }}
           SLACK_CHANNEL_NICE_GUY:      ${{ vars.SLACK_CHANNEL_NICE_GUY }}
           GITHUB_EVENT_NAME: ${{ github.event_name }}
+          # Passed as env, not interpolated into the script body, so a dispatch
+          # input can never be parsed as shell.
+          INPUT_DRY_RUN:    ${{ inputs.dry_run }}
+          INPUT_WEEK:       ${{ inputs.week }}
+          INPUT_SEND_EMAIL: ${{ inputs.send_email }}
         run: |
-          if [ "${{ inputs.dry_run }}" = "true" ]; then
-            node src/index.mjs --dry-run
-          else
-            node src/index.mjs
-          fi
+          ARGS=()
+          if [ "$INPUT_DRY_RUN" = "true" ]; then ARGS+=(--dry-run); fi
+          if [ -n "$INPUT_WEEK" ]; then ARGS+=("--week=$INPUT_WEEK"); fi
+          if [ "$INPUT_SEND_EMAIL" = "true" ]; then ARGS+=(--email); fi
+          echo "Running with args: ${ARGS[*]:-(none)}"
+          node src/index.mjs "${ARGS[@]}"

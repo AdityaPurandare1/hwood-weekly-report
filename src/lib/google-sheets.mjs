@@ -192,12 +192,83 @@ export async function findTabByTitle(spreadsheetId, title) {
 // the tab with the count date, not the report date. Mirrors the existing
 // historical naming convention (all weekly tabs are dated to Mondays).
 export function weekTabTitle(date = new Date()) {
-  const d = new Date(date);
-  const day = d.getDay();                  // 0=Sun..6=Sat
-  const offset = day === 0 ? 6 : day - 1;  // days since Monday
-  d.setDate(d.getDate() - offset);
+  const d = mondayOf(date);
   const m = d.getMonth() + 1;
   const dd = d.getDate();
   const y = String(d.getFullYear()).slice(-2);
   return `${m}/${dd}/${y}`;
+}
+
+// Normalise any date to the Monday of its week (midnight, local).
+export function mondayOf(date = new Date()) {
+  const d = new Date(date);
+  const day = d.getDay();                  // 0=Sun..6=Sat
+  const offset = day === 0 ? 6 : day - 1;  // days since Monday
+  d.setDate(d.getDate() - offset);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
+// The Slack history window a live run for `monday`'s week WOULD have used.
+//
+// A live run fires Tuesday ~17:00 UTC and looks back 7 days, so it captures
+// [prev Tue 17:00, this Tue 17:00]. Reproducing that window exactly is what
+// makes a backfilled tab match what the real run would have produced, rather
+// than an arbitrary Mon-to-Mon slice that could double-count or drop messages
+// at the boundary.
+export function slackWindowForWeek(monday) {
+  const latest = new Date(monday);
+  latest.setDate(latest.getDate() + 1);    // Tuesday, the run day
+  latest.setHours(17, 0, 0, 0);
+  const oldest = new Date(latest);
+  oldest.setDate(oldest.getDate() - 7);
+  return { oldest, latest };
+}
+
+// Parse a variance tab title like "8/3", "08/03" or "8/3/26" into a Date,
+// inferring the year from `nearDate` when the title omits it (Pati's tabs
+// mostly don't carry one). Returns null when the title isn't a date.
+export function parseVarianceTabDate(title, nearDate) {
+  const m = String(title).trim().match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+  if (!m) return null;
+  const month = Number(m[1]) - 1;
+  const day = Number(m[2]);
+  if (m[3]) {
+    const y = Number(m[3]);
+    return new Date(y < 100 ? 2000 + y : y, month, day);
+  }
+  // No year in the title: try the reference year and its neighbours, keeping
+  // whichever lands closest to the target week. This is what makes a January
+  // backfill not silently match a December tab from the wrong year.
+  const baseYear = nearDate.getFullYear();
+  let best = null;
+  for (const y of [baseYear - 1, baseYear, baseYear + 1]) {
+    const cand = new Date(y, month, day);
+    if (!best || Math.abs(cand - nearDate) < Math.abs(best - nearDate)) best = cand;
+  }
+  return best;
+}
+
+// Read the variance week matching `monday` (within +/- toleranceDays), rather
+// than whatever the newest tab happens to be. Backfilling a past week must not
+// staple THIS week's dollar figures onto a month-old issue list.
+//
+// Returns { week: null, rows: [] } when the sheet has no tab for that week.
+export async function readVarianceWeekFor(spreadsheetId, monday, toleranceDays = 4) {
+  const meta = await getSheetMetadata(spreadsheetId);
+  const tolerance = toleranceDays * 86400_000;
+  let match = null;
+  let matchDelta = Infinity;
+  for (const t of meta.tabs) {
+    const d = parseVarianceTabDate(t.title, monday);
+    if (!d) continue;
+    const delta = Math.abs(d - monday);
+    if (delta <= tolerance && delta < matchDelta) {
+      match = t;
+      matchDelta = delta;
+    }
+  }
+  if (!match) return { week: null, rows: [], sheetTitle: meta.title };
+  const rows = await readRange(spreadsheetId, `${match.title}!A1:Z`);
+  return { week: match.title, rows, sheetTitle: meta.title };
 }
