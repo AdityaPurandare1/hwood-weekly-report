@@ -160,6 +160,17 @@ const MAX_ATTEMPTS = 4;
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// A 429 is a per-MINUTE quota, so exponential backoff starting at 1s just burns
+// attempts inside the same window. Google returns the exact wait in a RetryInfo
+// detail (`"retryDelay": "27s"`); honour it when present, else back off in
+// minute-scale steps.
+export function retryDelayMs(status, bodyText, attempt) {
+  if (status !== 429) return 1000 * 2 ** (attempt - 1);        // 1s, 2s, 4s
+  const hinted = String(bodyText).match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  if (hinted) return Math.ceil(Number(hinted[1]) * 1000) + 1000; // +1s of slack
+  return [15000, 30000, 45000][attempt - 1] ?? 45000;
+}
+
 async function postWithRetry(body, token) {
   let lastErr;
   for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
@@ -181,9 +192,7 @@ async function postWithRetry(body, token) {
     const t = await res.text();
     lastErr = new Error(`Gemini ${res.status}: ${t.slice(0, 200)}`);
     if (!RETRY_STATUSES.has(res.status) || attempt === MAX_ATTEMPTS) throw lastErr;
-    // Longer backoff than the Sheets client: a 429 here means a per-MINUTE
-    // quota, so a sub-second retry would just burn another attempt.
-    await sleep(1000 * 2 ** (attempt - 1));   // 1s, 2s, 4s
+    await sleep(retryDelayMs(res.status, t, attempt));
   }
   throw lastErr;
 }

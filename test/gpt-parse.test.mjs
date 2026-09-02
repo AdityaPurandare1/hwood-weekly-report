@@ -4,7 +4,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { parseVenueMessages } from '../src/lib/gpt-parse.mjs';
+import { parseVenueMessages, retryDelayMs } from '../src/lib/gpt-parse.mjs';
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -383,4 +383,28 @@ test('parseVenueMessages: does NOT retry a permanent 403 (bad key)', async () =>
     restoreFetch();
     restoreEnv();
   }
+});
+
+// ---- 429 backoff sizing -----------------------------------------------------
+
+test('retryDelayMs: non-429 statuses use fast exponential backoff', () => {
+  assert.equal(retryDelayMs(503, '', 1), 1000);
+  assert.equal(retryDelayMs(503, '', 2), 2000);
+  assert.equal(retryDelayMs(503, '', 3), 4000);
+});
+
+test('retryDelayMs: a 429 without a hint backs off on a minute scale', () => {
+  // A sub-second retry inside a per-minute quota window just burns an attempt.
+  assert.ok(retryDelayMs(429, '', 1) >= 15000);
+  assert.ok(retryDelayMs(429, '', 2) >= 30000);
+});
+
+test("retryDelayMs: Google's retryDelay hint is honoured", () => {
+  const body = '{"error":{"details":[{"@type":"...RetryInfo","retryDelay":"27s"}]}}';
+  assert.equal(retryDelayMs(429, body, 1), 28000);   // hint + 1s slack
+});
+
+test('retryDelayMs: fractional retryDelay hint rounds up', () => {
+  const body = '{"retryDelay":"1.5s"}';
+  assert.equal(retryDelayMs(429, body, 1), 2500);
 });
