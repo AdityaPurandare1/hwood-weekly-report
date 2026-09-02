@@ -194,6 +194,48 @@ export async function formatHeaderRow(spreadsheetId, sheetId, numColumns, numRow
   });
 }
 
+// Where a tab for `monday` belongs in a newest-first tab list: immediately
+// before the first dated tab that is older than it.
+function desiredIndexFor(tabs, monday) {
+  for (let i = 0; i < tabs.length; i++) {
+    const d = parseVarianceTabDate(tabs[i].title, monday);
+    if (d && d < monday) return i;
+  }
+  return tabs.length;
+}
+
+// Move `title` to its chronological slot so the sheet stays newest-first.
+//
+// Needed because tabs are created leftmost, which is right for a normal weekly
+// run but wrong for a backfill of an older week — and re-running one failed
+// backfill after a newer one already landed leaves the two transposed.
+// Touches only this one tab; every other tab keeps its position.
+//
+// Returns the resulting dated-tab order so callers can log/verify it.
+export async function ensureTabPosition(spreadsheetId, title, monday) {
+  const meta = await getSheetMetadata(spreadsheetId);
+  const self = meta.tabs.find(t => t.title === title);
+  if (!self) return null;
+  const currentIndex = meta.tabs.indexOf(self);
+  const others = meta.tabs.filter(t => t !== self);
+  const desired = desiredIndexFor(others, monday);
+  if (currentIndex === desired) return meta.tabs.map(t => t.title);
+
+  // Sheets applies the new index AFTER removing the sheet from its old slot,
+  // so a forward move has to be requested one higher than the target.
+  const apiIndex = currentIndex < desired ? desired + 1 : desired;
+  await api('POST', `/${spreadsheetId}:batchUpdate`, {
+    requests: [{
+      updateSheetProperties: {
+        properties: { sheetId: self.id, index: apiIndex },
+        fields: 'index',
+      },
+    }],
+  });
+  const after = await getSheetMetadata(spreadsheetId);
+  return after.tabs.map(t => t.title);
+}
+
 // Write 2D array of values starting at A1 of the given tab.
 export async function writeValues(spreadsheetId, tabTitle, values) {
   if (!values || values.length === 0) return;

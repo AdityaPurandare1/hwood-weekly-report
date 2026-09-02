@@ -26,6 +26,7 @@ import {
   slackWindowForWeek,
   parseVarianceTabDate,
   findTabByTitle,
+  ensureTabPosition,
   clearTab,
   formatHeaderRow,
 } from './lib/google-sheets.mjs';
@@ -258,6 +259,11 @@ async function main() {
   // Always re-apply formatting — idempotent and keeps re-runs visually identical.
   await formatHeaderRow(NOTABLE_ISSUES_SHEET_ID, newSheetId, header.length);
   console.log(`${isNewTab ? 'Wrote' : 'Updated'} tab '${finalTitle}' with ${ranked.length} rows`);
+
+  // Keep the sheet newest-first. New tabs are created leftmost, which is correct
+  // for the weekly run but not for a backfill of an older week.
+  const order = await ensureTabPosition(NOTABLE_ISSUES_SHEET_ID, finalTitle, targetMonday);
+  if (order) console.log(`Tab order (first 8): ${order.slice(0, 8).join(', ')}`);
 
   // Email exactly-once per week. A scheduled run only emails when it CREATED this
   // week's tab; a redundant/delayed scheduled firing finds the tab already there
