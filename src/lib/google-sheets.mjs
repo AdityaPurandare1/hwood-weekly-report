@@ -33,21 +33,44 @@ async function getAccessToken() {
   return cachedAccessToken;
 }
 
+// Google Sheets intermittently answers 503 (and 429 under rate limit) on reads
+// that succeed moments later. Untreated, one blip silently drops a whole venue's
+// $ exposure from the report, so retry the transient classes with backoff.
+// 4xx other than 429 are permanent (403 = not shared, 404 = bad id) — fail fast.
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 4;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
 async function api(method, path, body) {
-  const token = await getAccessToken();
-  const res = await fetch(SHEETS_BASE + path, {
-    method,
-    headers: {
-      Authorization: `Bearer ${token}`,
-      ...(body ? { 'Content-Type': 'application/json' } : {}),
-    },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  if (!res.ok) {
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    const token = await getAccessToken();
+    let res;
+    try {
+      res = await fetch(SHEETS_BASE + path, {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(body ? { 'Content-Type': 'application/json' } : {}),
+        },
+        body: body ? JSON.stringify(body) : undefined,
+      });
+    } catch (err) {
+      // Network-level failure (DNS, socket reset) — also worth retrying.
+      lastErr = new Error(`Google Sheets ${method} ${path} -> network: ${err.message}`);
+      if (attempt === MAX_ATTEMPTS) throw lastErr;
+      await sleep(500 * 2 ** (attempt - 1));
+      continue;
+    }
+    if (res.ok) return res.json();
+
     const text = await res.text();
-    throw new Error(`Google Sheets ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
+    lastErr = new Error(`Google Sheets ${method} ${path} -> ${res.status}: ${text.slice(0, 300)}`);
+    if (!RETRY_STATUSES.has(res.status) || attempt === MAX_ATTEMPTS) throw lastErr;
+    await sleep(500 * 2 ** (attempt - 1));   // 0.5s, 1s, 2s
   }
-  return res.json();
+  throw lastErr;
 }
 
 // Get metadata: title + list of tab names with their sheetIds.
