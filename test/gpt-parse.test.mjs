@@ -304,3 +304,83 @@ test('parseVenueMessages: abnormal finishReason throws', async () => {
     restoreEnv();
   }
 });
+
+// ---- transient-failure retry ------------------------------------------------
+
+// Build a stub that fails with `status` for the first `failures` calls, then
+// succeeds. Returns a counter so tests can assert the number of attempts.
+function stubFlaky(failures, status, payload) {
+  const state = { calls: 0 };
+  globalThis.fetch = async () => {
+    state.calls++;
+    if (state.calls <= failures) {
+      return {
+        ok: false,
+        status,
+        async json() { return {}; },
+        async text() { return `{"error":{"code":${status}}}`; },
+      };
+    }
+    return {
+      ok: true,
+      status: 200,
+      async json() {
+        return { candidates: [{ finishReason: 'STOP', content: { parts: [{ text: payload }] } }] };
+      },
+      async text() { return payload; },
+    };
+  };
+  return state;
+}
+
+test('parseVenueMessages: retries a 503 and succeeds on the next attempt', async () => {
+  setTokenForTest();
+  const payload = JSON.stringify({ issues: [{ item_name: 'Test Item 750ml', issue_type: 'Missing' }] });
+  const state = stubFlaky(1, 503, payload);
+  try {
+    const out = await parseVenueMessages('Test Venue', ['msg1']);
+    assert.equal(state.calls, 2, 'should have retried exactly once');
+    assert.equal(out.length, 1);
+    assert.equal(out[0].item_name, 'Test Item 750ml');
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});
+
+test('parseVenueMessages: retries a 429 rate-limit response', async () => {
+  setTokenForTest();
+  const payload = JSON.stringify({ issues: [] });
+  const state = stubFlaky(1, 429, payload);
+  try {
+    await parseVenueMessages('Test Venue', ['msg1']);
+    assert.equal(state.calls, 2);
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});
+
+test('parseVenueMessages: does NOT retry a permanent 400', async () => {
+  setTokenForTest();
+  const state = stubFlaky(99, 400, '');
+  try {
+    await assert.rejects(() => parseVenueMessages('Test Venue', ['msg1']), /Gemini 400/);
+    assert.equal(state.calls, 1, 'a 400 must fail fast, not burn retries');
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});
+
+test('parseVenueMessages: does NOT retry a permanent 403 (bad key)', async () => {
+  setTokenForTest();
+  const state = stubFlaky(99, 403, '');
+  try {
+    await assert.rejects(() => parseVenueMessages('Test Venue', ['msg1']), /Gemini 403/);
+    assert.equal(state.calls, 1);
+  } finally {
+    restoreFetch();
+    restoreEnv();
+  }
+});

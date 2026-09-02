@@ -150,6 +150,44 @@ function safeJsonExtract(raw) {
   return [];
 }
 
+// Gemini answers 503 UNAVAILABLE when the model is momentarily overloaded, and
+// 429 when the free tier's per-minute quota is hit. Both clear on their own, but
+// unretried they abort the whole weekly run partway through — which is exactly
+// how the 8/3 backfill died. 4xx other than 429 are permanent (bad key, bad
+// request) and fail fast.
+const RETRY_STATUSES = new Set([429, 500, 502, 503, 504]);
+const MAX_ATTEMPTS = 4;
+
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function postWithRetry(body, token) {
+  let lastErr;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    let res;
+    try {
+      res = await fetch(ENDPOINT, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'x-goog-api-key': token },
+        body,
+      });
+    } catch (err) {
+      lastErr = new Error(`Gemini network error: ${err.message}`);
+      if (attempt === MAX_ATTEMPTS) throw lastErr;
+      await sleep(1000 * 2 ** (attempt - 1));
+      continue;
+    }
+    if (res.ok) return res.json();
+
+    const t = await res.text();
+    lastErr = new Error(`Gemini ${res.status}: ${t.slice(0, 200)}`);
+    if (!RETRY_STATUSES.has(res.status) || attempt === MAX_ATTEMPTS) throw lastErr;
+    // Longer backoff than the Sheets client: a 429 here means a per-MINUTE
+    // quota, so a sub-second retry would just burn another attempt.
+    await sleep(1000 * 2 ** (attempt - 1));   // 1s, 2s, 4s
+  }
+  throw lastErr;
+}
+
 // Parse a batch of Slack message texts for a single venue.
 // Returns array of { item_name, issue_type, quantity, location, notes }
 export async function parseVenueMessages(venue, messages) {
@@ -160,31 +198,21 @@ export async function parseVenueMessages(venue, messages) {
   const text = messages.join('\n\n---\n\n');
   const sysPrompt = buildSystemPrompt(venue);
 
-  const res = await fetch(ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      'x-goog-api-key': token,
+  const body = JSON.stringify({
+    systemInstruction: { parts: [{ text: sysPrompt }] },
+    contents: [{ role: 'user', parts: [{ text }] }],
+    generationConfig: {
+      temperature: 0.3,
+      maxOutputTokens: 8000,
+      responseMimeType: 'application/json',
+      responseSchema: RESPONSE_SCHEMA,
+      // Extraction, not reasoning — thinking tokens would just eat the output
+      // budget and risk a MAX_TOKENS truncation mid-array.
+      thinkingConfig: { thinkingBudget: 0 },
     },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: sysPrompt }] },
-      contents: [{ role: 'user', parts: [{ text }] }],
-      generationConfig: {
-        temperature: 0.3,
-        maxOutputTokens: 8000,
-        responseMimeType: 'application/json',
-        responseSchema: RESPONSE_SCHEMA,
-        // Extraction, not reasoning — thinking tokens would just eat the output
-        // budget and risk a MAX_TOKENS truncation mid-array.
-        thinkingConfig: { thinkingBudget: 0 },
-      },
-    }),
   });
-  if (!res.ok) {
-    const t = await res.text();
-    throw new Error(`Gemini ${res.status}: ${t.slice(0, 200)}`);
-  }
-  const data = await res.json();
+
+  const data = await postWithRetry(body, token);
 
   // A prompt blocked by safety filters comes back 200 with no candidate.
   const candidate = data?.candidates?.[0];
