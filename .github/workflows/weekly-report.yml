@@ -42,6 +42,7 @@ jobs:
           GOOGLE_REFRESH_TOKEN:     ${{ secrets.GOOGLE_REFRESH_TOKEN }}
           SLACK_TOKEN:              ${{ secrets.SLACK_TOKEN }}
           GEMINI_API_KEY:           ${{ secrets.GEMINI_API_KEY }}
+          GEMINI_MODEL:             ${{ vars.GEMINI_MODEL }}
           RESEND_API_KEY:           ${{ secrets.RESEND_API_KEY }}
           PATI_DM_CHANNEL_ID:       ${{ secrets.PATI_DM_CHANNEL_ID }}
           NOTABLE_ISSUES_SHEET_ID:  ${{ secrets.NOTABLE_ISSUES_SHEET_ID }}

@@ -42,7 +42,7 @@ Slack venue channels ──► GPT parse ─┘
 | `GOOGLE_CLIENT_SECRET` | Google Cloud Console OAuth client | `GOCSPX-...` |
 | `GOOGLE_REFRESH_TOKEN` | OAuth playground or local script, scope `spreadsheets` | `1//0g...` |
 | `SLACK_TOKEN` | Slack user token (xoxp) with `channels:history`, `groups:history`, `im:history`, `conversations.list` | `xoxp-...` |
-| `GEMINI_API_KEY` | Google AI Studio -> "Get API key" (free tier, no billing card) | `AIza...` |
+| `GEMINI_API_KEY` | Google AI Studio -> "Get API key" (free tier, no billing card) | `AIza...` or `AQ....` |
 | `RESEND_API_KEY` | Resend dashboard | `re_...` |
 | `PATI_DM_CHANNEL_ID` | Open Pati's DM in Slack -> click her profile -> "Channel ID" at the bottom | `D0XXXXXXXXX` |
 | `NOTABLE_ISSUES_SHEET_ID` | The `/d/<id>/` segment of the Notable Issues sheet URL | 44-char alphanumeric |
@@ -50,11 +50,20 @@ Slack venue channels ──► GPT parse ─┘
 
 > **Note on `GEMINI_API_KEY`** — the message parser ran on GitHub Models
 > (`gpt-4o-mini`) until that service was retired in Aug 2026; every run from
-> 2026-08-04 failed with `GitHub Models 404` / `410 retirement_brownout`. It now
-> runs on Gemini 2.5 Flash via the AI Studio **free tier** — no billing card, and
-> the limits (10 req/min, 250 req/day) sit far above this pipeline's ~6 calls per
-> weekly run. Get a key at <https://aistudio.google.com/apikey>. The old
-> `GH_MODELS_TOKEN` secret is no longer read and can be deleted.
+> 2026-08-04 failed with `GitHub Models 404`, then `fetch failed` once the
+> endpoint host stopped resolving. It now runs on Gemini via the AI Studio
+> **free tier** — no billing card. Get a key at
+> <https://aistudio.google.com/apikey>; AI Studio issues keys in two formats
+> (`AIza...` and `AQ....`) and both are valid. The old `GH_MODELS_TOKEN` secret
+> is no longer read and can be deleted.
+>
+> **Watch the daily quota.** The free tier meters
+> `GenerateRequestsPerDayPerProjectPerModel`, and on `gemini-2.5-flash` that
+> ceiling is **20 requests/day** — fine for a normal weekly run (~6 calls), but a
+> multi-week backfill blows straight through it. The quota is *per model*, so
+> switching models is also the fastest way to get a fresh allowance. The default
+> is now `gemini-3.7-flash`; override with the **`GEMINI_MODEL`** repo variable
+> (no code change needed) if it hits a quota wall or gets retired in turn.
 
 ## Re-authing the Google token
 
@@ -106,6 +115,33 @@ Configured under Settings -> Secrets and variables -> Actions -> Variables.
    in the Actions log instead.
 
 The timezone guard is skipped for manual runs, so you can trigger at any hour.
+
+## Backfilling a missed week
+
+If a run fails and a week is missing from the sheet, set the `week` input to any
+date inside that week (`YYYY-MM-DD`). The pipeline then rebuilds that week rather
+than the current one:
+
+- Slack history is read as a **closed window** reproducing what a live Tuesday
+  10am run would have seen — not an open-ended "last 7 days".
+- Variance is read from the tab **matching that week**, so a backfill can't
+  staple this week's dollar figures onto month-old issues. Pati's DM lookback
+  widens to 60 days, since the variance spreadsheet ids are stable and only the
+  tab inside them changes week to week.
+- Aging counts only tabs strictly **before** the target week, so backfills are
+  order-independent and safe to re-run.
+- The email is **suppressed** — rebuilding five weeks shouldn't fire five
+  notifications. Tick `send_email` to override.
+
+Backfill oldest-week-first so the newest-tab-leftmost convention still holds
+afterwards, and **leave ~90 seconds between dispatches**: the Gemini free tier
+allows 10 requests per minute and each run spends up to 6 of them, so
+back-to-back runs will trip the quota. The client retries a 429 on a minute-scale
+backoff, but consecutive runs can still exhaust it.
+
+```
+gh workflow run "Weekly Notable Issues Report" -f week=2026-08-03
+```
 
 ## Running locally
 

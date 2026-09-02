@@ -7,7 +7,13 @@
 // Gemini 2.5 Flash is the replacement: free tier, no billing card, 10 RPM / 250 RPD —
 // far above this pipeline's ~6 calls per weekly run.
 
-const MODEL = 'gemini-2.5-flash';
+// Free-tier quota is per-model-per-day (GenerateRequestsPerDayPerProjectPerModel),
+// and for gemini-2.5-flash that ceiling is only 20 requests — enough for the ~6
+// calls of a normal weekly run, but a backfill of several weeks exhausts it.
+// Overridable so a quota wall or another model retirement is a variable change,
+// not a code change: the GitHub Models retirement that caused the Aug 2026
+// outage would have been a one-line fix if this had been configurable.
+const MODEL = process.env.GEMINI_MODEL || 'gemini-3.7-flash';
 const ENDPOINT =
   `https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`;
 
